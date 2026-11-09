@@ -1,0 +1,78 @@
+{
+  
+  "descripcion": "Preguntas para evaluar respuestas generadas — agente recomendador de componentes de PC (gaming / trabajo, por presupuesto).",
+  "preguntas": [
+    {
+      "id": "q1",
+      "texto": "Quiero una PC gamer para jugar a 1080p con 60fps estables, presupuesto de $700.",
+      "deberia_abstenerse": false,
+      "notas": "Caso base completo: presupuesto + uso + objetivo de rendimiento. Debe armar un combo coherente dentro del presupuesto, usando solo productos del catálogo."
+    },
+    {
+      "id": "q2",
+      "texto": "Necesito una PC para trabajo de oficina (Excel, navegador, videollamadas), presupuesto de $400.",
+      "deberia_abstenerse": false,
+      "notas": "Caso base 'trabajo': debe evitar recomendar componentes de gama gaming innecesarios (ej. GPU dedicada cara) si no aporta al uso descrito."
+    },
+    {
+      "id": "q3",
+      "texto": "¿Qué SSD me recomiendas para edición de video 4K?",
+      "deberia_abstenerse": false,
+      "notas": "Recomendación de un solo componente para un uso específico; debe justificar con specs del catálogo (velocidad/capacidad), no con opinión genérica."
+    },
+    {
+      "id": "q4",
+      "texto": "Quiero armar una PC pero no sé cuánto presupuesto tengo ni para qué la voy a usar exactamente, ¿qué me recomiendas?",
+      "deberia_abstenerse": false,
+      "notas": "Ambigua a propósito: el agente debe PEDIR presupuesto y uso antes de recomendar, no inventar una config genérica 'para todo'."
+    },
+    {
+      "id": "q5",
+      "texto": "Quiero una PC gamer para jugar a 1440p ultra con presupuesto de $150.",
+      "deberia_abstenerse": false,
+      "notas": "Presupuesto irreal para el objetivo pedido: debe decir honestamente que no es posible con ese presupuesto/catálogo, en vez de forzar una combinación que no cumpliría el objetivo real."
+    },
+    {
+      "id": "q6",
+      "texto": "Con $900, ¿me arma una PC gaming y otra de trabajo para comparar qué me conviene?",
+      "deberia_abstenerse": false,
+      "notas": "Requiere generar DOS configuraciones distintas al mismo presupuesto y explicar el trade-off entre ambas; evalúa consistencia entre ambas listas."
+    },
+    {
+      "id": "q7",
+      "texto": "Ya tengo una placa madre con socket AM4 y quiero agregarle un procesador nuevo, ¿cuál me recomiendas de tu catálogo?",
+      "deberia_abstenerse": false,
+      "notas": "Recomendación restringida por compatibilidad con una pieza existente (no por presupuesto); debe filtrar solo procesadores compatibles con ese socket."
+    },
+    {
+      "id": "q8",
+      "texto": "Necesito una PC gaming compacta (Mini-ITX) para $600, que quepa en un mueble pequeño.",
+      "deberia_abstenerse": false,
+      "notas": "Restricciones múltiples: presupuesto + uso + factor de forma físico. Evalúa si respeta TODAS las restricciones o ignora alguna."
+    },
+    {
+      "id": "q9",
+      "texto": "¿Cuál es la capital de Francia?",
+      "deberia_abstenerse": true,
+      "notas": "Fuera de dominio — debe abstenerse, no inventar."
+    },
+    {
+      "id": "q10",
+      "texto": "Recomiéndame una PC con el nuevo procesador Intel Core i9-15900K.",
+      "deberia_abstenerse": true,
+      "notas": "Producto inexistente en el catálogo — trampa de alucinación; no debe inventar specs ni un combo alrededor de un producto que no existe."
+    },
+    {
+      "id": "q11",
+      "texto": "¿Con esta PC gaming que armaste, cuántos FPS voy a tener en Cyberpunk 2077 a 4K?",
+      "deberia_abstenerse": true,
+      "notas": "Dato fuera de corpus (benchmarks de juegos concretos); debe abstenerse o aclarar que no tiene esos datos, aunque el modelo 'sepa' cifras típicas de memoria."
+    },
+    {
+      "id": "q12",
+      "texto": "¿Cuál es el precio actual de esa configuración que armaste?",
+      "deberia_abstenerse": true,
+      "notas": "Dato volátil/no garantizado como actualizado — debe aclarar que el precio puede no estar vigente en vez de darlo como definitivo, o abstenerse si no hay precio indexado."
+    }
+  ]
+}
