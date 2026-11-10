@@ -1,86 +1,139 @@
-![!\[Cabecera\](./assets/cabecera_thebridge.png)](assets/cabecera_thebridge.png)
+# PCompAgent: asistente de componentes de PC
 
-# Asistente PcComponentes
+![Cabecera de The Bridge](assets/cabecera_thebridge.png)
 
-<p align="left">
-<img src="https://img.shields.io/badge/STATUS-EN%20DESARROLLO-green">
-</p> 
+**Estado:** en desarrollo · **Uso:** educativo
 
-[![GitHub stars](https://img.shields.io/github/stars/Ameisin?style=for-the-badge&label=Estrellas&logo=github)](https://github.com/Ameisin/PCompAgent)
+PCompAgent es un asesor conversacional para elegir componentes y preparar configuraciones de PC según el uso y el presupuesto. Combina un sistema RAG con un agente multiagente construido con LangGraph y una revisión humana antes de dar por cerrado un plan.
 
+El proyecto reutiliza el RAG desarrollado en el **Project Break 1 (PB1)**: el agente del **Project Break 2 (PB2)** lo invoca como herramienta mediante `logic.responder()`, sin depender de Streamlit ni construir un segundo RAG.
 
 ## Índice
-* [Descripción del proyecto](#descripción-del-proyecto)
-* [Características de la aplicación](#Características-de-la-aplicación)
-* [Acceso al proyecto](#acceso-proyecto)
-* [Project Break 2: agente multiagente](#project-break-2-agente-multiagente-langgraph)
-* [Tecnologías utilizadas](#tecnologías-utilizadas)
-* [Desarrolladores del Proyecto](#desarrolladores-del-proyecto)
-* [Conclusión](#conclusión)
 
-## Descripción del proyecto
-**PCompAgent** es un asistente conversacional basado en RAG (Retrieval-Augmented Generation) para ayudar a elegir componentes de PC por piezas: procesador, tarjeta gráfica, placa base, memoria, almacenamiento, fuente de alimentación, caja y refrigeración. Responde preguntas sobre características, precios orientativos, compatibilidad entre piezas (socket, tipo de memoria, formato de placa y caja) y requisitos de videojuegos, apoyándose únicamente en un corpus propio indexado en una base vectorial.
+- [Alcance y contrato del agente](#alcance-y-contrato-del-agente)
+- [Arquitectura](#arquitectura)
+- [Grafo multiagente](#grafo-multiagente)
+- [Herramientas](#herramientas)
+- [Corpus y fuentes](#corpus-y-fuentes)
+- [Instalación](#instalación)
+- [Ejecución](#ejecución)
+- [Ejemplos de uso](#ejemplos-de-uso)
+- [Configuración](#configuración)
+- [Estructura del proyecto](#estructura-del-proyecto)
+- [Limitaciones y siguientes pasos](#limitaciones-y-siguientes-pasos)
+- [Tecnologías](#tecnologías)
+- [Equipo y licencia](#equipo-y-licencia)
 
-El sistema sigue una arquitectura RAG completa:
+## Alcance y contrato del agente
 
-1. **Pipeline offline**: carga del corpus, limpieza, chunking, generación de embeddings e indexación persistente en ChromaDB.
-2. **Pipeline online**: la pregunta del usuario se vectoriza, se recuperan los *top-k* fragmentos más similares y un LLM (Gemini) redacta la respuesta usando solo ese contexto. Si el corpus no contiene la evidencia necesaria, el asistente se abstiene en lugar de inventar.
+### Qué debe resolver
 
-El corpus combina dos formatos:
+El asistente está diseñado para tratar peticiones relacionadas con PC por piezas, siempre que disponga de los datos necesarios:
 
-- **CSV** con el catálogo de componentes (12 categorías) y un CSV de requisitos mínimos y recomendados de videojuegos. Cada fila se convierte en una frase en lenguaje natural con metadatos (categoría, socket, precio, etc.).
-- **Markdown** con guías de compra y montaje (elección de CPU, RAM, placa base, fuente, SSD, refrigeración y una guía de montaje de PC gaming).
+| Tipo de petición | Ejemplo | Fuente o actuación prevista |
+|---|---|---|
+| Configuración por uso y presupuesto | «Quiero un PC gaming por 700 USD» | Extraer requisitos, consultar el catálogo y proponer un plan revisable. |
+| Componentes individuales | «Tengo 150 USD para placa y RAM compatibles con AM4» | Buscar piezas del catálogo y razonar sobre la compatibilidad. |
+| Características y compatibilidad | «¿Qué memoria usa una placa AM4?» | Consultar las fuentes disponibles y señalar la evidencia o la ausencia de datos. |
+| Requisitos de videojuegos | «¿Qué requisitos recomendados tiene Cyberpunk 2077?» | Consultar el corpus de juegos cuando el título esté indexado. |
+| Presupuesto en otra moneda | «Mi presupuesto es de 700 EUR» | Usar la herramienta de conversión; el catálogo usa USD. |
+| Ficha técnica en imagen | «Lee la ficha y recomienda placa y RAM» | Interpretar una imagen admitida de `assets/` y usar los datos pertinentes. |
 
-Este proyecto es la primera pieza de un proyecto incremental: el RAG expone una API interna (`responder(pregunta) -> dict`) independiente de la interfaz, pensada para reutilizarse como *tool* en fases posteriores.
+Para una recomendación, el agente comprueba los datos mínimos de uso y presupuesto según sus reglas. Si faltan, solicita una aclaración en vez de cerrar una propuesta. Las preguntas factuales también se pueden hacer directamente al RAG mediante `python main.py --ask`, sin pasar por el flujo de planificación.
 
-## Características de la aplicación
-### Asistente
-- **Respuestas ancladas al corpus**: el LLM solo utiliza los fragmentos recuperados y cita la fuente de cada dato.
-- **Abstención**: ante preguntas fuera de dominio (geografía, productos inexistentes, benchmarks no indexados) el asistente indica que no tiene esa información en lugar de inventar.
-- **Compatibilidad entre piezas**: el corpus incluye tablas derivadas (microarquitectura → socket, socket → tipo de memoria, tipo de caja → formatos de placa admitidos) que enriquecen cada fila de componente.
-- **Requisitos de videojuegos**: requisitos mínimos y recomendados de más de 2.000 juegos publicados desde 2019.
+### Qué no debe resolver
 
-### Procesamiento de datos
-Un área de los datos del corpus ha sido procesada para **favorecer la eficiencia en el consumo de tokens** del modelo LLM. 
+- Preguntas ajenas al dominio, por ejemplo «¿Cuál es la capital de Francia?». Debe explicar su ámbito y abstenerse.
+- Datos que no estén respaldados por el catálogo, las guías, el índice disponible o las herramientas: no debe inventar productos, especificaciones, requisitos ni resultados de rendimiento.
+- Precios actuales, existencias o enlaces de compra en tiempo real: los precios son una fotografía del dataset, expresada en USD.
+- Compras, pagos o pedidos: el sistema propone y permite aprobar un plan, pero no ejecuta transacciones.
+- Garantías de compatibilidad o rendimiento: la comprobación depende de la información disponible y del razonamiento del modelo; una persona debe verificar la propuesta antes de comprar.
 
-Los datos se han obtenido de la **[página web oficial de Intel](https://www.intel.la/content/www/xl/es/gaming/resources/how-to-build-a-gaming-pc.html)**. Se han descargado todas las páginas con contenido relevante para el proyecto en formato **HTML**. Después, se ha desarrollado un script, `convertir_html_a_markdown`, para **convertir todos los archivos en HTML a Markdown**. 
+Estas reglas expresan el **comportamiento esperado**, no una garantía de que el modelo siempre lo cumpla. En particular, el agente puede pedir datos adicionales incluso para una pregunta sencilla; las limitaciones conocidas se detallan [más abajo](#limitaciones-y-siguientes-pasos).
 
-El modelo LLM podría leer el archivo en formato HTML, pero además de leer la información crucial, leería toda la información del estilo visual, la estructura y semántica compleja, multimedia y recursos emebebidos, scripsts, metadatos y comportamiento. Esa información no es útil, **podría encaminar a errores** y sobre todo, **costar más cantidad de tokens de lectura** de los necesarios. 
+## Arquitectura
 
-### Interfaz Streamlit (`streamlit run app.py`)
-Desde el PB2, la interfaz es cliente del agente multiagente (ver [Project Break 2](#project-break-2-agente-multiagente-langgraph)):
-- Chat con historial; cada mensaje es un turno del grafo (`procesar_turno`).
-- Barra lateral: `max_steps`, `max_turns`, `thread_id`, botón "Nueva conversación" (nuevo `thread_id`).
-- HITL: cuando hay un plan, el chat se bloquea y aparecen los botones Aprobar y Rechazar (con motivo opcional).
-- Expander de depuración: log del supervisor, traza de tools, traza por turno, checkpoints e indicadores HITL y `done`.
+El sistema separa la preparación de datos de la conversación:
 
-El RAG del PB1 sigue disponible sin interfaz con `python main.py --ask "pregunta"`.
+1. **RAG offline:** carga CSV y documentos, limpia y fragmenta el texto, genera embeddings y crea un índice vectorial persistente en ChromaDB.
+2. **RAG online:** vectoriza la consulta, recupera los fragmentos más relevantes y pide a Gemini una respuesta anclada al contexto, con fuentes o abstención cuando no hay evidencia.
+3. **Agente PB2:** un supervisor coordina especialistas y tools para producir una propuesta. La interfaz CLI y Streamlit son clientes del mismo grafo.
+4. **Revisión humana:** el grafo se detiene antes de aplicar el plan; la persona lo aprueba o rechaza.
 
-### CLI (`python main.py`)
-| Comando | Descripción |
+El corpus combina CSV de componentes y requisitos de videojuegos con guías de compra y montaje en Markdown. Cada fila de CSV se transforma en texto con metadatos; los documentos Markdown se dividen por secciones y fragmentos. Las guías descargadas en HTML se convirtieron a Markdown con `convertir_html_a_markdown.py` para conservar el contenido útil y reducir ruido y consumo de tokens.
+
+## Grafo multiagente
+
+```mermaid
+flowchart TD
+    Inicio([START]) --> Supervisor[supervisor]
+    Supervisor -->|requisitos| Requisitos[requisitos]
+    Supervisor -->|componentes| Componentes[componentes]
+    Supervisor -->|sintetizar| Sintetizar[sintetizar]
+    Requisitos --> Supervisor
+    Componentes --> Supervisor
+    Sintetizar --> Supervisor
+    Supervisor -->|FINISH: faltan datos| Fin([END])
+    Supervisor -->|FINISH: hay propuesta| Pausa{{Pausa HITL antes de aplicar}}
+    Pausa -->|aprobación o rechazo| Aplicar[aplicar]
+    Aplicar --> Fin
+
+    Requisitos -.-> ToolsRequisitos["Tools: RAG, imagen y divisa"]
+    Componentes -.-> ToolsComponentes["Tools: catálogo, RAG y cálculo"]
+```
+
+Las líneas continuas representan los **edges del grafo**; las discontinuas indican herramientas que pueden usar los especialistas, no nodos independientes de LangGraph. Ambos especialistas reciben la allowlist completa: los grupos del diagrama describen sus usos habituales, no permisos exclusivos.
+
+| Nodo | Responsabilidad |
 |---|---|
-| `python main.py` | Indexa el corpus si aún no existe el índice y abre la interfaz Streamlit |
-| `python main.py --prepare` | Carga, limpia, fragmenta y vectoriza el corpus (`output/embeddings.json`) |
-| `python main.py --index [--recreate-index]` | Indexa los embeddings en ChromaDB; con `--recreate-index` regenera la colección desde cero |
-| `python main.py --query "pregunta" [--top-k N]` | Solo retrieval: muestra los fragmentos recuperados y su contexto |
-| `python main.py --ask "pregunta" [--top-k N]` | RAG completo: respuesta del LLM con fuentes y métricas |
-| `python main.py --eval` | Barrido de varios valores de K sobre las preguntas de evaluación |
+| `supervisor` | Selecciona el siguiente rol o `FINISH`. Python valida la elección y dispone de reglas de respaldo si el LLM falla o propone una transición inválida. |
+| `requisitos` | Detecta uso, presupuesto y necesidades; pregunta si faltan datos y elabora notas técnicas y un reparto orientativo. |
+| `componentes` | Busca piezas concretas y razona sobre socket, memoria, formato y fuente según los datos disponibles. |
+| `sintetizar` | Une las notas en una respuesta y un plan. Python extrae precios y avisa si el total calculado supera el presupuesto. |
+| `aplicar` | Tras la decisión humana, cierra un plan aprobado o limpia la propuesta rechazada y conserva el motivo en el historial. |
 
-### Configuración centralizada (`config.py`)
-Todos los parámetros ajustables viven en un único fichero: rutas, categorías de CSV, filtros del corpus, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `MAX_CHUNKS`, proveedor y modelo de embeddings, `TOP_K`, modelo y temperatura de generación. Algunos pueden sobrescribirse por variable de entorno (`EMBEDDING_PROVIDER`, `MAX_CHUNKS`, `MAX_FILAS_POR_CSV`, `ESTRATEGIA_CHUNKING`).
+El supervisor puede finalizar el turno sin pasar por HITL cuando faltan datos. En el caso normal con propuesta, LangGraph pausa **antes** de `aplicar` mediante `interrupt_before=["aplicar"]`; el cliente guarda la decisión con `update_state` y reanuda con `invoke(None)`. Una aprobación establece `done=True`; un rechazo permite pedir otra propuesta en el mismo hilo. La demo de la CLI puede aprobar automáticamente, mientras que los modos interactivos permiten decidir manualmente.
 
-> ⚠️ Si cambias el modelo de embeddings, `CHUNK_SIZE` o `MAX_CHUNKS`, regenera el índice con `python main.py --recreate-index`.
+`MemorySaver` mantiene checkpoints en memoria identificados por `thread_id`. Se reutiliza el mismo identificador durante una conversación; uno nuevo inicia otra. Los hilos se pierden al reiniciar el proceso.
 
-## Acceso al proyecto
+## Herramientas
+
+El agente usa una lista permitida en `src/tools/__init__.py`: el modelo propone llamadas y Python valida argumentos y bloquea nombres no registrados. Cada llamada se registra con nombre, argumentos, estado (`ok`, `error` o `blocked`) y un resumen del resultado.
+
+| Categoría | Tool | Función y uso habitual |
+|---|---|---|
+| RAG completo | `RAG_consultar_catalogo` | Invoca `logic.responder()` del PB1 para consultar catálogo, guías y juegos con fuentes; la usan los especialistas cuando necesitan evidencia. |
+| Catálogo | `buscar_componentes` | Busca componentes en los CSV por categoría y rango de precio; la usa principalmente `componentes`. |
+| API externa | `convertir_divisa` | Convierte moneda mediante [Frankfurter](https://frankfurter.dev/), con tasas locales de respaldo si falla la API; el resultado indica fuente y fecha. |
+| Auxiliar | `calcular_total_build` | Suma precios y compara con un presupuesto; puede apoyar la revisión de la propuesta. |
+| Auxiliar | `hora_actual` | Devuelve fecha y hora. |
+| Multimodal | `describir_imagen` | Gemini interpreta una imagen permitida de `assets/`, como `assets/imagen_demo.jpg`. |
+
+El respaldo de divisas es una fotografía local y puede estar desactualizado. La suma y la compatibilidad deben revisarse: extraer precios del texto o razonar con un LLM no equivale a una validación completa de la configuración.
+
+## Corpus y fuentes
+
+| Fuente | Formato | Contenido | Referencia |
+|---|---|---|---|
+| Catálogo de componentes de PCPartPicker | CSV | Doce categorías con precios y especificaciones. | Se utiliza el dataset incluido en `data/csv/`; falta verificar y documentar su URL de descarga original. |
+| Requisitos de videojuegos | CSV | Requisitos mínimos y recomendados; el procesamiento filtra por año. | [Dataset en Kaggle](https://www.kaggle.com/datasets/baraazaid/pc-video-game-requirements-v2). |
+| Guías de compra y montaje | Markdown | Guías sobre CPU, memoria, placa, fuente, SSD, refrigeración y montaje. | [Guía de montaje de Intel](https://www.intel.la/content/www/xl/es/gaming/resources/how-to-build-a-gaming-pc.html). |
+| Imagen de demostración | JPEG | Ficha técnica de ejemplo creada para el proyecto. | `assets/imagen_demo.jpg`. |
+
+Las fechas de descarga de los datasets y guías no constan en la documentación existente y deben añadirse cuando se confirmen. Las fuentes se usan con fines educativos; debe comprobarse la licencia y condiciones de cada fuente antes de redistribuir o reutilizar sus datos. No se deben incluir claves o secretos en el repositorio: `.env` está excluido por `.gitignore`.
+
+El informe existente documenta que el índice suministrado puede estar **incompleto**: incluye CPU, placas, RAM, cajas y videojuegos, pero no todas las categorías ni las guías. El contenido efectivo depende del índice generado; disponer de un CSV o Markdown en `data/` no implica que esté indexado. `buscar_componentes` consulta los CSV para apoyar búsquedas de productos.
+
+## Instalación
+
 ### Requisitos
 
-- **Python 3.10 o superior** (el proyecto se ha desarrollado con Python 3.14).
-- **Git** para clonar el repositorio.
-- **Clave de API de Gemini** (Google AI Studio). Es necesaria para generar embeddings y respuestas. Puedes obtenerla en https://aistudio.google.com/apikey.
-- Conexión a internet para llamar a la API de Gemini.
-- Opcional: si prefieres embeddings locales sin API, instala `sentence-transformers` y usa `EMBEDDING_PROVIDER=huggingface` (requiere varios GB de dependencias).
+- Python 3.10 o superior; el proyecto se ha desarrollado con Python 3.14.
+- Git y conexión a internet para las dependencias y las llamadas a Gemini.
+- Una clave de Gemini obtenida en [Google AI Studio](https://aistudio.google.com/apikey).
+- Cuota disponible para los modelos de generación y, si se usan, embeddings de Gemini.
 
-### Entorno virtual
+### Preparar el entorno
 
 1. Clona el repositorio:
 
@@ -89,17 +142,17 @@ Todos los parámetros ajustables viven en un único fichero: rutas, categorías 
    cd PCompAgent
    ```
 
-2. Crea y activa el entorno virtual.
+2. Crea y activa un entorno virtual:
 
-   Windows (PowerShell):
    ```powershell
+   # Windows PowerShell
    python -m venv .venv
    .venv\Scripts\Activate.ps1
    ```
 
-   Linux / macOS:
    ```bash
-   python -m venv .venv
+   # Linux / macOS
+   python3 -m venv .venv
    source .venv/bin/activate
    ```
 
@@ -109,200 +162,184 @@ Todos los parámetros ajustables viven en un único fichero: rutas, categorías 
    python -m pip install -r requirements.txt
    ```
 
-4. Configura la clave de API. Copia la plantilla y edita el fichero `.env` con tu clave:
+4. Copia `.env.example` a `.env` y añade tu clave:
 
-   ```bash
-   cp .env.example .env
-   ```
-
-   Contenido de `.env`:
-   ```
+   ```text
    GEMINI_API_KEY=tu_clave_aqui
    ```
 
-   > El fichero `.env` está en `.gitignore` y nunca debe subirse al repositorio.
+   No compartas ni subas `.env`.
 
-5. Genera el índice la primera vez (tarda unos minutos porque vectoriza todo el corpus):
+5. Prepara los embeddings y crea el índice. La generación puede tardar y consumir cuota:
 
    ```bash
    python main.py --prepare
    python main.py --index --recreate-index
    ```
 
-6. Prueba el asistente desde la terminal o abre la interfaz:
+   `--recreate-index` reconstruye la colección: úsalo cuando quieras reemplazar el índice existente. Repite la preparación y la indexación si cambias el modelo de embeddings, el corpus o los parámetros de fragmentación. Comprueba que las categorías esperadas se hayan indexado.
 
-   ```bash
-   python main.py --ask "¿Qué socket usa un procesador Ryzen 7 7700X?"
-   streamlit run app.py
-   ```
+La opción `EMBEDDING_PROVIDER=huggingface` utiliza embeddings locales; requiere las dependencias correspondientes y recursos de descarga y disco. El agente y la generación con Gemini siguen necesitando clave.
 
-   También puedes ejecutar simplemente `python main.py`: si no existe el índice lo construye y a continuación abre Streamlit.
+## Ejecución
 
-### Estructura del proyecto
+### RAG del PB1
 
+| Comando | Resultado |
+|---|---|
+| `python main.py --prepare` | Carga, limpieza, fragmentación y embeddings en `output/embeddings.json`. |
+| `python main.py --index --recreate-index` | Crea de nuevo la colección de ChromaDB con los embeddings preparados. |
+| `python main.py --query "pregunta" --top-k 3` | Recupera fragmentos y contexto, sin generar la respuesta final. |
+| `python main.py --ask "pregunta" --top-k 3` | Consulta el RAG completo y muestra respuesta y fuentes. |
+| `python main.py --eval` | Evalúa retrieval con varios valores de K. |
+| `python main.py` | Prepara e indexa si no hay índice y abre Streamlit. |
+
+Ejemplos:
+
+```bash
+python main.py --ask "¿Qué socket usa el procesador AMD Ryzen 7 7700X?"
+python main.py --ask "¿Cuál es la capital de Francia?"
 ```
+
+La primera consulta depende de que el dato esté indexado; la segunda sirve para comprobar la abstención fuera del corpus.
+
+### Agente multiagente
+
+Desde la raíz del proyecto:
+
+```bash
+python -m src.verificar_grafo           # comprobaciones con LLM simulado, sin llamar a la API
+python -m src.cli                       # demo con aprobación automática
+python -m src.cli --sin-auto-aprobar    # demo que se detiene en HITL
+python -m src.cli --interactivo         # chat con aprobación o rechazo manual
+python -m src.cli --supervisor-reglas   # supervisor determinista, menos llamadas al LLM
+streamlit run app.py                    # interfaz web
+```
+
+La CLI acepta, entre otras opciones, `--mensaje`, `--max-steps` y `--max-turns`. En modo interactivo, cuando haya un plan pendiente, escribe `aprobar` o `rechazar`; en el segundo caso puedes indicar un motivo. La demo estándar autoaprueba: utiliza `--sin-auto-aprobar` o `--interactivo` para revisar la pausa manualmente.
+
+En Streamlit, el chat muestra el historial y la barra lateral permite ajustar límites, consultar el `thread_id` e iniciar una conversación nueva. Si hay un plan pendiente, aparecen los botones de aprobación y rechazo; el panel de depuración muestra el log del supervisor, las tools, checkpoints y estado HITL.
+
+### Probar HITL y multimodal
+
+1. Inicia el modo interactivo o Streamlit.
+2. Pide: «Mira la ficha técnica de la imagen y dime qué placa base y RAM compatibles me recomiendas por menos de 150 USD».
+3. Comprueba que la traza incluya `describir_imagen` y revisa el plan y sus precios.
+4. Rechaza el plan con el motivo «como mucho 120 USD», pide «Ajústalo a ese límite» y revisa la nueva propuesta.
+5. Aprueba la propuesta si procede; el estado pasa a `done=True`.
+
+La imagen de ejemplo y los resultados de una prueba previa se describen en [`entregables/informe_decisiones.md`](entregables/informe_decisiones.md). El resultado de cada ejecución puede variar y debe comprobarse.
+
+### API para clientes
+
+CLI y Streamlit llaman al mismo contrato del agente:
+
+```python
+from src.agent import aprobar_plan, nuevo_thread_id, procesar_turno
+from src.state import crear_estado
+
+estado = crear_estado("")
+thread_id = nuevo_thread_id()
+estado = procesar_turno(
+    estado, "PC para oficina con presupuesto de 400 USD",
+    thread_id, max_steps=4, max_turns=6,
+)
+
+if estado["pendiente_hitl"]:
+    estado = aprobar_plan(thread_id, True, estado)
+    # Para rechazar: aprobar_plan(thread_id, False, estado, comentario="motivo")
+```
+
+El estado expone, entre otros campos, `respuesta`, `plan`, `resumen_presupuesto`, `pendiente_hitl`, `done`, `error`, `log`, `traza` y `thread_id`. `historial_checkpoints(thread_id)` permite consultar los checkpoints del hilo.
+
+## Configuración
+
+`config.py` concentra parámetros del RAG: rutas, categorías del corpus, filtros, tamaño y solapamiento de fragmentos, proveedor de embeddings y `TOP_K`. `src/config_grafo.py` reúne los parámetros del agente.
+
+| Variable / parámetro | Valor por defecto | Propósito |
+|---|---|---|
+| `GEMINI_API_KEY` | Sin valor | Autenticación para Gemini; se configura en `.env`. |
+| `EMBEDDING_PROVIDER` | `gemini` | Proveedor de embeddings; alternativa: `huggingface`. |
+| `MAX_CHUNKS` | Sin límite global | Límite opcional de fragmentos al preparar el corpus. |
+| `MAX_FILAS_POR_CSV` | `400` | Límite de filas por categoría. |
+| `ESTRATEGIA_CHUNKING` | `markdown_headers` | Estrategia de fragmentación de documentos. |
+| `AGENTE_GEMINI_MODEL` | `gemini-3.1-flash-lite` | Modelo de los nodos del agente. |
+| `AGENTE_RAG_MODEL` | Modelo del agente | Modelo de generación utilizado por la tool RAG. |
+| `AGENTE_LLM_RPM` / `AGENTE_RAG_RPM` | `10` / `4` | Límites de ritmo por modelo; ajustar a la cuota disponible. |
+| `AGENTE_SUPERVISOR_LLM` | `1` | Con `0`, el supervisor utiliza reglas Python en lugar del LLM. |
+| `MAX_ITER` | `8` | Límite de vueltas del supervisor por turno. |
+| `max_steps` / `max_turns` | `4` / `6` | Límites de pasos con tools por especialista y mensajes por conversación. |
+
+Los límites se controlan en Python y no los decide únicamente el modelo. La cuota y disponibilidad de los modelos pueden cambiar; consulta la documentación del proveedor si aparecen errores de API.
+
+## Estructura del proyecto
+
+```text
 PCompAgent/
 ├── README.md
 ├── requirements.txt
-├── .env.example                 # plantilla de variables de entorno
-├── .gitignore
-├── config.py                    # configuración centralizada
-├── main.py                      # CLI: prepare / index / query / ask / eval
-├── app.py                       # interfaz Streamlit
-│
-├── load.py                      # carga del corpus (CSV -> frases, Markdown/PDF -> Document)
-├── clean.py                     # normalización de texto
-├── chunk.py                     # fragmentación (Markdown por encabezados, CSV atómico)
-├── embed.py                     # embeddings Gemini / Hugging Face + caché
-├── index.py                     # indexación en ChromaDB
-├── retrieve.py                  # retrieval top-k
-├── context.py                   # formateo del contexto recuperado
-├── prompt.py                    # plantilla del prompt RAG
-├── generate_rep.py              # llamada al LLM (Gemini)
-├── logic.py                     # API interna: responder(pregunta) -> dict
-├── eval_retrival.py             # evaluación de retrieval con varios K
-├── gemini_auto.py               # carga de la API key
-├── verificar.py                 # comprobaciones automáticas
-├── convertir_html_a_markdown.py # utilidad para añadir guías al corpus
-│
-├── data/
-│   ├── csv/                     # catálogo de componentes + requisitos de videojuegos
-│   └── md/                      # guías de compra y montaje en Markdown
-├── queries/
-│   └── preguntas_eval.json      # set de preguntas de evaluación
-├── entregables/
-│   └── informe_decisiones.md    # informe final del equipo
-├── output/                      # embeddings.json y logs (gitignored, se regenera)
-└── chroma/                      # índice ChromaDB persistente (gitignored, se regenera)
+├── .env.example
+├── config.py                    # configuración del RAG
+├── main.py                      # CLI del RAG e indexación
+├── app.py                       # interfaz Streamlit del agente
+├── load.py, clean.py, chunk.py # carga y preparación del corpus
+├── embed.py, index.py           # embeddings e índice Chroma
+├── retrieve.py, context.py      # recuperación y contexto
+├── prompt.py, generate_rep.py   # prompt y generación
+├── logic.py                     # API del RAG: responder(...)
+├── eval_retrival.py             # evaluación de retrieval
+├── gemini_auto.py, verificar.py
+├── convertir_html_a_markdown.py
+├── src/
+│   ├── graph.py                 # estado, nodos, edges y HITL
+│   ├── agent.py, state.py       # contrato y estado para clientes
+│   ├── guardrails.py            # preferencias, aclaraciones y presupuesto
+│   ├── config_grafo.py, llm.py  # configuración y modelo del agente
+│   ├── registro_tools.py
+│   ├── tools/                   # allowlist y herramientas
+│   ├── cli.py                   # CLI del agente
+│   ├── verificar_grafo.py       # comprobaciones con LLM simulado
+│   └── README_GRAFO.md
+├── tools/                       # utilidades y prototipos
+├── data/                        # CSV, guías y respaldo de divisas
+├── assets/                      # recursos visuales e imagen de demostración
+├── queries/                     # preguntas de evaluación
+├── entregables/                 # informe y documentación del proyecto
+├── output/                      # embeddings y logs generados
+└── chroma/                      # índice vectorial persistente
 ```
 
-### Fuentes del corpus
+Los archivos de `output/` y `chroma/` son artefactos generados; su presencia en un checkout depende de cómo se haya distribuido el proyecto. No se deben asumir como completos o actualizados.
 
-| Fuente | Formato | Contenido | Enlace |
-|---|---|---|---|
-| Dataset de componentes de PC (PCPartPicker) | CSV | 12 categorías de componentes con precio y especificaciones | [PCPartPicker](https://www.kaggle.com/datasets/baraazaid/pc-video-game-requirements-v2) |
-| Dataset de requisitos de videojuegos | CSV | Requisitos mínimos y recomendados por juego | [Kaggle](https://www.kaggle.com/datasets/baraazaid/pc-video-game-requirements-v2) |
-| Guías de compra y montaje | Markdown | 7 guías (CPU, RAM, placa base, fuente, SSD, refrigeración, montaje) | [Intel](https://www.intel.la/content/www/xl/es/gaming/resources/how-to-build-a-gaming-pc.html) |
+## Limitaciones y siguientes pasos
 
-Todos los datos son públicos y se utilizan con fines educativos.
+- **Índice incompleto:** regenerarlo y verificar la cobertura de categorías, juegos y guías antes de depender de él.
+- **Compatibilidad no estructurada:** el LLM puede proponer combinaciones incompatibles. Añadir comprobaciones deterministas de socket, RAM, dimensiones, alimentación y demás restricciones; verificar manualmente mientras tanto.
+- **Precio y disponibilidad:** los CSV no representan el mercado en tiempo real; confirmar precios y existencias en la tienda.
+- **Presupuesto:** la extracción de precios del texto y el cálculo son orientativos; revisar manualmente total y moneda.
+- **Memoria temporal:** `MemorySaver` no sobrevive al reinicio. Un checkpointer persistente como SQLite o PostgreSQL sería un siguiente paso.
+- **Cuota y latencia:** un turno puede requerir varias llamadas al modelo y tardar minutos; errores de cuota o red pueden impedir la respuesta.
+- **Detección de preferencias:** las reglas se basan en palabras clave; algunas formulaciones pueden necesitar aclaraciones.
+- **Evaluación:** ampliar las pruebas de grounding, abstención, compatibilidad, HITL, multimodal y cobertura del índice; incorporar comprobaciones automáticas en CI.
 
-### Preguntas de ejemplo
+La preparación del corpus, una configuración centralizada y la abstención ante datos ausentes son decisiones esenciales del proyecto. El paso de RAG a multiagente permite planificar recomendaciones, pero no elimina la necesidad de validar los datos ni sustituye la revisión humana.
 
-- ¿Qué socket usa el procesador AMD Ryzen 7 7700X y qué tipo de memoria necesita?
-- ¿Qué placas base admite una caja ATX Mid Tower?
-- ¿Cuántos vatios recomienda la guía para una fuente de alimentación en un PC gaming?
-- ¿Qué requisitos recomendados tiene Cyberpunk 2077?
-- ¿Cuál es la capital de Francia? *(fuera de corpus: el asistente debe abstenerse)*
+## Tecnologías
 
-## Project Break 2: agente multiagente (LangGraph)
+| Área | Tecnologías |
+|---|---|
+| Lenguaje e interfaz | Python, Streamlit |
+| Orquestación y herramientas | LangGraph, LangChain, `langchain-google-genai` |
+| RAG y datos | ChromaDB, Google GenAI, pandas, LangChain text splitters |
+| Embeddings locales | sentence-transformers / Hugging Face |
+| Documentos | BeautifulSoup, pypdf |
+| API externa | Frankfurter |
+| Configuración y control de versiones | python-dotenv, Git y GitHub |
 
-El agente es un asesor de compra de PC. A partir del uso y el presupuesto propone una configuración con piezas reales del catálogo, comprueba compatibilidad y precio, y no la da por cerrada hasta que una persona la aprueba (HITL).
+## Equipo y licencia
 
-Reutilizamos el RAG completo del PB1 (corpus CSV y Markdown, ChromaDB, Gemini y abstención). La tool `RAG_consultar_catalogo` llama a su API interna `logic.responder()`, así que no hay un segundo RAG.
+- Mario Bac Díaz — [Ameisin](https://github.com/Ameisin)
+- Javier — [TermiJP](https://github.com/TermiJP)
+- Jaime Pérez — [JaimePVillanueva](https://github.com/JaimePVillanueva)
 
-El agente resuelve configuraciones por presupuesto y uso, piezas sueltas, compatibilidad, requisitos de videojuegos, conversión de moneda y lectura de una ficha técnica en imagen. No da precios en tiempo real de tiendas ni hace compras, y si la pregunta no es del dominio lo dice en lugar de inventar.
-
-### Grafo
-
-```text
-START -> supervisor --+-- requisitos ---+
-                      +-- componentes --+--> supervisor -> ...
-                      +-- sintetizar ---+
-                FINISH --+-- aplicar (pausa: la persona aprueba o rechaza) -> END
-                         +-- END (faltan presupuesto o uso: se pregunta al usuario)
-```
-
-- `supervisor`: elige el siguiente rol con el LLM; si la elección no vale, decide una regla en Python. Tiene un tope de vueltas (`MAX_ITER`).
-- `requisitos`: traduce el pedido a requisitos técnicos y a un reparto del presupuesto. Suele usar el RAG, `describir_imagen` y `convertir_divisa`.
-- `componentes`: elige piezas reales y comprueba la compatibilidad (socket, tipo de memoria, formato, fuente). Suele usar `buscar_componentes`, el RAG y `calcular_total_build`.
-- `sintetizar`: junta las notas en un plan con viñetas; después Python suma los precios y los compara con el presupuesto.
-- `aplicar`: solo se ejecuta tras la decisión humana. Pone `done=True` o vacía el plan guardando el motivo del rechazo.
-
-La memoria entre turnos usa `MemorySaver` con `thread_id`. Hay más detalle en [`src/README_GRAFO.md`](src/README_GRAFO.md).
-
-### Tools (allowlist en `src/tools/__init__.py`)
-
-| Categoría | Tool | Qué hace |
-|---|---|---|
-| RAG completo | `RAG_consultar_catalogo` | `responder()` del PB1: respuesta basada en el corpus con sus fuentes, o abstención |
-| Catálogo | `buscar_componentes` | Productos reales del CSV por categoría y rango de precio, con sus especificaciones |
-| API externa | `convertir_divisa` | [Frankfurter](https://frankfurter.dev) (tipos del BCE, sin clave), con `data/divisas_fallback.json` si no hay red |
-| Auxiliares | `calcular_total_build`, `hora_actual` | Suma de la configuración frente al presupuesto, y fecha y hora |
-| Multimodal | `describir_imagen` | Gemini lee `assets/imagen_demo.jpg` (ficha técnica de prueba) u otra imagen de `assets/` |
-
-Cada llamada queda en la traza con `tool`, `args`, `status` (`ok`, `error` o `blocked`) y `preview`. Las tools se pueden probar por separado, sin gastar API, con `python -m src.verificar_grafo`.
-
-### Instalación y ejecución del agente
-
-1. Sigue los pasos de [Entorno virtual](#entorno-virtual) (el `requirements.txt` ya incluye LangGraph) y crea el `.env` a partir de `.env.example`.
-2. El índice del RAG está en el repositorio. Para regenerarlo: `python main.py --prepare` y `python main.py --index --recreate-index`.
-3. Comprobaciones sin API:
-
-   ```bash
-   python -m src.verificar_grafo
-   ```
-
-4. CLI del agente:
-
-   ```bash
-   python -m src.cli                    # demo, con el HITL aprobado automáticamente
-   python -m src.cli --sin-auto-aprobar # se queda en la pausa HITL
-   python -m src.cli --interactivo      # chat; con un plan pendiente: aprobar / rechazar
-   ```
-
-5. Streamlit: `streamlit run app.py`.
-
-### Cómo probar el HITL y la parte multimodal
-
-- HITL: en `--interactivo` o en Streamlit, escribe "Ya tengo un Ryzen con socket AM4, ¿qué placa base y RAM me recomiendas por menos de 150 USD?". Cuando salga el plan, recházalo con el motivo "como mucho 120 USD", pide "Ajústalo a ese límite" y después apruébalo (`done=True`).
-- Multimodal: "Mira la ficha técnica de la imagen y dime qué placa base y RAM compatibles me recomiendas por menos de 150 USD". En la traza aparece `describir_imagen`.
-- Fuera de dominio: "¿Cuál es la capital de Francia?". El agente explica para qué sirve y no inventa.
-
-Los límites los decide Python: `MAX_ITER` (supervisor), `max_steps` (tools por especialista) y `max_turns` (mensajes). Con la API gratuita de Gemini un turno tarda 2-3 minutos, porque espaciamos las llamadas para no recibir errores 429.
-
-Todos los datos son públicos y de uso educativo, la imagen de prueba la hicimos para el proyecto y no hay claves en el repositorio (`.env` está en `.gitignore`).
-
-## Tecnologías utilizadas
-
-| Área | Tecnología | Uso en el proyecto |
-|---|---|---|
-| Lenguaje | **Python 3.10+** | Todo el pipeline y la interfaz |
-| Carga de documentos | **LangChain** (`langchain-core`, `langchain-community`) | `Document`, `TextLoader`, `PyPDFLoader` |
-| Chunking | **langchain-text-splitters** | `MarkdownHeaderTextSplitter` + `RecursiveCharacterTextSplitter` |
-| Datos tabulares | **pandas** | Lectura y filtrado de los CSV del catálogo |
-| PDF | **pypdf** | Extracción de texto de guías en PDF |
-| Embeddings | **Google GenAI SDK** (`google-genai`) · modelo `gemini-embedding-001` | Vectorización de chunks y consultas (768 dimensiones) |
-| Embeddings alternativos | **sentence-transformers** (opcional) | Embeddings locales sin API |
-| Base vectorial | **ChromaDB** | Índice persistente con distancia coseno y metadatos |
-| Generación | **Gemini** (`gemini-3-flash-preview`) | Redacción de la respuesta anclada al contexto |
-| Agente | **LangGraph** + `langchain-google-genai` | Grafo multiagente, `MemorySaver`, `interrupt_before` (HITL), tools `@tool` |
-| API externa | **Frankfurter** (BCE) | Conversión de moneda con fallback local |
-| Interfaz | **Streamlit** | Chat del agente, botones HITL y depuración |
-| Configuración | **python-dotenv** | Carga de la API key desde `.env` |
-| Utilidades | **BeautifulSoup4** | Conversión de guías HTML a Markdown para ampliar el corpus |
-| Control de versiones | **Git + GitHub** | Ramas `main` / `develop` / `feature/*` y pull requests |
-## Desarrolladores del proyecto
- - Mario Bac Díaz (github: Ameisin)
- - Javier (github: TermiJP)
- - Jaime Pérez (github: JaimePVillanueva)
-
-## Conclusión
-
-PCompAgent cierra de punta a punta una arquitectura RAG completa: un corpus propio en dos formatos, un índice vectorial persistente en ChromaDB, retrieval *top-k* y generación con Gemini anclada exclusivamente al contexto recuperado. Todo ello con una separación clara entre el pipeline offline de indexación y el pipeline online de consulta, y con una API interna (`responder`) que la CLI y la interfaz Streamlit comparten sin duplicar lógica.
-
-### Qué hemos aprendido
-
-- **El corpus manda.** La mayor parte del esfuerzo no ha estado en el LLM sino en preparar los datos: convertir filas de CSV en frases con sentido, enriquecerlas con conocimiento derivado (socket, tipo de memoria, formatos de placa) y elegir una estrategia de chunking distinta para tablas y para guías. Un retrieval mediocre no se arregla con un prompt mejor.
-- **Configuración centralizada y regenerable.** Tener `CHUNK_SIZE`, `TOP_K`, el modelo de embeddings y los filtros del corpus en `config.py`, junto con un índice que se reconstruye con un solo comando, ha permitido experimentar sin miedo a romper nada.
-- **Abstenerse es una funcionalidad, no un fallo.** Un asistente que reconoce que la información no está en sus documentos es más útil y más fiable que uno que responde siempre.
-- **Trabajo en equipo con Git.** Ramas por bloque funcional y pull requests revisadas han hecho que la integración del corpus, el retrieval, la generación y la interfaz haya sido incremental y trazable.
-
-### Limitaciones actuales
-
-- El asistente responde bien a preguntas sobre un componente, una compatibilidad o una guía concreta, pero no está diseñado para montar configuraciones completas por presupuesto: eso exige razonamiento sobre varios fragmentos y restricciones a la vez.
-- Los precios y el catálogo son una foto fija del dataset y no reflejan el mercado actual.
-- La evaluación es ligera y manual: mide retrieval con varios valores de K y revisa a ojo grounding y abstención sobre un conjunto reducido de preguntas.
-
----
-
-
+Consulta [`LICENSE`](LICENSE) para la licencia del código y las condiciones de cada fuente para sus datos.
